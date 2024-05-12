@@ -1,0 +1,35 @@
+{
+    "portal": {
+        "listenAddr": "127.0.0.1:8080"
+
+    },
+    "swabby": {
+        "enable": true,
+        "scheduleHours": 1,
+        "expiryDays": {
+            "derelictShip": 7,
+            "routeHistory": 3
+        }
+    },
+    "google": {
+        "api": "<your key>"
+    },
+    "aisstream": {
+        "url": "wss://stream.aisstream.io/v0/stream",
+        "api": "<your key>",
+        "defaultSub": {
+            "boxes": [
+                [
+                    [
+                        -90,
+                        -180
+                    ],
+                    [
+                        90,
+                        180
+                    ]
+                ]
+            ]
+        }
+    }
+}

@@ -1,0 +1,59 @@
+#map {
+    height: 100%;
+}
+
+#search {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 300px;
+    height: 48px;
+    background-color: rgb(255, 255, 255, .5);
+    z-index: 2;
+    font-size: 18px;
+    font-family: 'Roboto', sans-serif;
+}
+
+#search-results {
+    position: absolute;
+    top: 50px;
+    left: 1px;
+    width: 300px;
+    background-color: rgb(255, 255, 255, .7);
+    z-index: 2;
+}
+
+.search-result {
+    font-family: 'Roboto', sans-serif;
+    margin: 1px;
+}
+
+.search-result:hover {
+    background-color: rgb(255, 255, 255);
+  }
+
+.search-result-name {
+    text-align: left
+}
+
+.search-result-mmsi {
+    float: right
+}
+
+#infoWindow {
+    white-space: pre-line;
+}
+
+.gm-style-iw button:focus {
+    outline: 0;
+}
+
+a:active, a:focus {
+    outline: 0;
+}
+
+html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
