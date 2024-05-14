@@ -1,6 +1,7 @@
 {
     "portal": {
-        "listenAddr": "127.0.0.1:8080"
+        "listenAddr": "127.0.0.1:8080",
+        "htmlDir": "./html"
 
     },
     "swabby": {
@@ -35,6 +36,10 @@
                 "<your mmsi 2>",
                 "<your mmsi 3>",
                 "<your mmsi 4>"
+            ],
+            "filterMsgType": [
+                "PositionReport",
+                "ShipStaticData"
             ]
         }
     }

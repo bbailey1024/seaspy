@@ -6,22 +6,25 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strconv"
 )
 
 type Portal struct {
 	ListenAddr string `json:"listenAddr"`
+	HtmlDir    string `json:"htmlDir"`
 }
 
 type Google struct {
 	Api string `json:"api"`
 }
 
-func ListenAndServe(addr string, dock *Dock, g Google) *http.Server {
+func ListenAndServe(p Portal, dock *Dock, g Google) *http.Server {
 
 	mux := http.NewServeMux()
 
-	staticFs := http.FileServer(http.Dir("./html/static"))
+	htmlDir := filepath.Join(p.HtmlDir, "static")
+	staticFs := http.FileServer(http.Dir(htmlDir))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticFs))
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +49,7 @@ func ListenAndServe(addr string, dock *Dock, g Google) *http.Server {
 	mux.HandleFunc("GET /shipTypes", shipTypes)
 	mux.HandleFunc("GET /shipGroups", shipGroups)
 
-	server := &http.Server{Addr: "127.0.0.1:8080", Handler: mux}
+	server := &http.Server{Addr: p.ListenAddr, Handler: mux}
 	go func() {
 		err := server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {

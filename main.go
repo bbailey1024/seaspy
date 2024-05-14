@@ -33,6 +33,7 @@ func main() {
 	ais := aisstream.NewAIS(config.Aisstream.Url, config.Aisstream.Api)
 	ais.Sub.AddBox(config.Aisstream.DefaultSub.Boxes)
 	ais.Sub.AddMMSI(config.Aisstream.DefaultSub.FilterMMSI)
+	ais.Sub.AddMsgType(config.Aisstream.DefaultSub.FilterMsgType)
 	go ais.ConnectAndStream()
 
 	dock := NewDock(10)
@@ -41,7 +42,7 @@ func main() {
 	swabby := NewSwabby(config.Swabby)
 	go swabby.Cleanup(dock)
 
-	server := ListenAndServe(config.Portal.ListenAddr, dock, config.Google)
+	server := ListenAndServe(config.Portal, dock, config.Google)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)

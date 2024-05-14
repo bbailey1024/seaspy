@@ -38,7 +38,7 @@ Sea Spy is designed to track hundreds of thousands of vessels via Google Maps wi
 
 5. Verify Sea Spy is running
    * Open your browser
-   * Navigate to [http://localhost:8080](http://localhost:8080).
+   * Navigate to [http://127.0.0.1:8080](http://127.0.0.1:8080).
 
 ### Known Issues
 * Vessel shape clipping

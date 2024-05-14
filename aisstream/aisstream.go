@@ -38,8 +38,9 @@ type Config struct {
 	Url        string `json:"url"`
 	Api        string `json:"api"`
 	DefaultSub struct {
-		Boxes      [][][]float64 `json:"boxes"`
-		FilterMMSI []string      `json:"filterMMSI"`
+		Boxes         [][][]float64 `json:"boxes"`
+		FilterMMSI    []string      `json:"filterMMSI"`
+		FilterMsgType []string      `json:"filterMsgType"`
 	} `json:"defaultSub"`
 }
 
