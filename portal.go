@@ -23,12 +23,12 @@ func ListenAndServe(p Portal, dock *Dock, g Google) *http.Server {
 
 	mux := http.NewServeMux()
 
-	htmlDir := filepath.Join(p.HtmlDir, "static")
-	staticFs := http.FileServer(http.Dir(htmlDir))
+	staticDir := filepath.Join(p.HtmlDir, "static")
+	staticFs := http.FileServer(http.Dir(staticDir))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticFs))
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		index(w, r, g)
+		index(w, r, p.HtmlDir, g)
 	})
 	mux.HandleFunc("GET /shipCount", func(w http.ResponseWriter, r *http.Request) {
 		shipCount(w, r, dock)
@@ -59,8 +59,9 @@ func ListenAndServe(p Portal, dock *Dock, g Google) *http.Server {
 	return server
 }
 
-func index(w http.ResponseWriter, _ *http.Request, g Google) {
-	tmpl, err := template.New("index.html").ParseFiles("./html/templates/index.html")
+func index(w http.ResponseWriter, _ *http.Request, htmlDir string, g Google) {
+	indexTemplate := filepath.Join(htmlDir, "templates", "index.html")
+	tmpl, err := template.New("index.html").ParseFiles(indexTemplate)
 	if err != nil {
 		log.Fatalf("could not read index file: %s\n", err.Error())
 	}
