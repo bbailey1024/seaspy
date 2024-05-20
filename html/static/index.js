@@ -155,7 +155,7 @@ async function seaspy() {
                     continue;
                 }
 
-                addShipMarker(state, ships, mmsi, ship, tileId);
+                addShipMarker(state, ships, ship, tileId);
             }
         }
 
@@ -230,7 +230,7 @@ async function openInfoWindow(gmap, ships, mmsi) {
     const ship = ships.map[mmsi];
     const shipInfo = await getShipInfo(mmsi);
     const category = getShipGroup(ships, ship.shipType).category;
-    const content = formatContent(mmsi, ship, shipInfo, category);
+    const content = formatContent(ship, shipInfo, category);
 
     ships.infowindow.setOptions({
         content: content,
@@ -242,6 +242,11 @@ async function openInfoWindow(gmap, ships, mmsi) {
 
 async function openShipHistory(gmap, ships, mmsi) {
     const shipHist = await getShipHistory(mmsi);
+
+    if (shipHist.length == 0) {
+        return;
+    }
+
     const historyIcon = {
         path: "M 0,-1 0,1",
         strokeColor: "#03ad25",
@@ -266,7 +271,7 @@ async function openShipHistory(gmap, ships, mmsi) {
     ships.route.setMap(gmap);
 }
 
-async function addShipMarker(state, ships, mmsi, ship, tileId) {
+async function addShipMarker(state, ships, ship, tileId) {
     let shipGroup = getShipGroup(ships, ship.shipType);
     let latlng = {lat: ship.latlon[0], lng: ship.latlon[1]};
 
@@ -287,7 +292,7 @@ async function addShipMarker(state, ships, mmsi, ship, tileId) {
         var color = colors.get(drawType);
 
         let path = draw(ctx, shape, color);
-        state.shapes.get(tileId).push({path: path, color: color, mmsi: mmsi});
+        state.shapes.get(tileId).push({path: path, color: color, mmsi: ship.mmsi});
 
         var clipping = clipPositions(centerPoint, shape, tileSize);
         for (let i in clipping) {
@@ -301,12 +306,12 @@ async function addShipMarker(state, ships, mmsi, ship, tileId) {
                 let clippedTile = state.tileIdToDetails.get(clippedTileId); 
                 let clippedCtx = clippedTile.canvas.getContext("2d");
                 let path = draw(clippedCtx, clippedShape, color);
-                state.shapes.get(clippedTileId).push({path: path, color: color, mmsi: mmsi});
+                state.shapes.get(clippedTileId).push({path: path, color: color, mmsi: ship.mmsi});
             } else {
                 if (!state.clipBuffer.has(clippedTileId)) {
                     state.clipBuffer.set(clippedTileId, []);
                 }
-                state.clipBuffer.get(clippedTileId).push({drawFunc: draw, shape: clippedShape, color: color, mmsi: mmsi});
+                state.clipBuffer.get(clippedTileId).push({drawFunc: draw, shape: clippedShape, color: color, mmsi: ship.mmsi});
             }
         }
     }
@@ -356,7 +361,7 @@ function getShipGroup(ships, type) {
     return shipGroup;
 }
 
-function formatContent(mmsi, ship, shipInfo, category) {
+function formatContent(ship, shipInfo, category) {
     let name = ship.name;
     if (shipInfo.imoNumber) {
         name = `<a href="https://www.shipspotting.com/photos/gallery?imo=${shipInfo.imoNumber}" target="_blank" rel="noopener noreferrer">${ship.name}</a>`;
@@ -365,7 +370,7 @@ function formatContent(mmsi, ship, shipInfo, category) {
     const content = 
     `<div id="infoWindow">` +
     `<p><b>${name}</b></p>` +
-    `<p>MMSI: ${mmsi}\n` + 
+    `<p>MMSI: ${ship.mmsi}\n` + 
     `Position: ${ship.latlon[0].toFixed(4)}, ${ship.latlon[1].toFixed(4)}\n` +
     `Heading: ${ship.heading}\n` +
     `Speed (kt): ${ship.sog}\n` +

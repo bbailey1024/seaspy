@@ -9,12 +9,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"time"
 
 	"seaspy/aisstream"
 )
 
 type Config struct {
+	Dock      Dock             `json:"dock"`
 	Portal    Portal           `json:"portal"`
 	Swabby    Swabby           `json:"swabby"`
 	Aisstream aisstream.Config `json:"aisstream"`
@@ -36,23 +36,15 @@ func main() {
 	ais.Sub.AddMsgType(config.Aisstream.DefaultSub.FilterMsgType)
 	go ais.ConnectAndStream()
 
-	dock := NewDock(10)
+	dock := NewDock(config.Dock)
 	go dock.Run(ais.Msg)
 
 	swabby := NewSwabby(config.Swabby)
 	go swabby.Cleanup(dock)
 
-	server := ListenAndServe(config.Portal, dock, config.Google)
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	<-stop
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		fmt.Printf("http server failed to shutdown: %s\n", err.Error())
-	}
+	ListenAndServe(ctx, dock, config.Portal, config.Google)
 
 	ais.Quit <- struct{}{}
 	<-ais.Done

@@ -241,7 +241,7 @@ function drawPolygon2D(ctx, polygon, color) {
     return t;
 }
 
-// drawCircle derives a center point and radius from the dimensions of the provided polygon.
+// drawCircle2D derives a center point and radius from the dimensions of the provided polygon.
 // In practice, for this application, it should always be a square.
 // Non-square polygons will behave in an unexpected manner and will produce a console warning.
 // This was done to support easier workflow for the tile clipping operations.

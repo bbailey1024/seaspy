@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"sync"
 	"time"
@@ -16,11 +17,12 @@ const (
 )
 
 type Dock struct {
-	Workers    int
-	WorkerList []*DockWorker
-	Quit       chan struct{}
-	Done       chan struct{}
-	Ships      *Ships
+	ShipHistory bool `json:"shipHistory"`
+	Workers     int  `json:"workerCount"`
+	WorkerList  []*DockWorker
+	Quit        chan struct{}
+	Done        chan struct{}
+	Ships       *Ships
 }
 
 type Ships struct {
@@ -33,6 +35,7 @@ type Ships struct {
 }
 
 type State struct {
+	MMSI       int       `json:"mmsi"`
 	Name       string    `json:"name"`
 	LatLon     []float64 `json:"latlon"`
 	Heading    int       `json:"heading"`
@@ -60,13 +63,27 @@ type ShipDump struct {
 	History []History `json:"history"`
 }
 
-func NewDock(w int) *Dock {
+type DockWorker struct {
+	Quit chan struct{}
+	Done chan struct{}
+}
+
+func NewDock(d Dock) *Dock {
+	d.WorkerList = []*DockWorker{}
+	d.Quit = make(chan struct{})
+	d.Done = make(chan struct{})
+	d.Ships = NewShips()
+	return &d
+}
+
+func NewDockDefaults() *Dock {
 	return &Dock{
-		Workers:    w,
-		WorkerList: []*DockWorker{},
-		Quit:       make(chan struct{}),
-		Done:       make(chan struct{}),
-		Ships:      NewShips(),
+		Workers:     10,
+		WorkerList:  []*DockWorker{},
+		Quit:        make(chan struct{}),
+		Done:        make(chan struct{}),
+		Ships:       NewShips(),
+		ShipHistory: true,
 	}
 }
 
@@ -79,6 +96,11 @@ func NewShips() *Ships {
 }
 
 func (d *Dock) Run(msg <-chan []byte) {
+
+	if d.Workers < 1 {
+		log.Fatalf("must have at least 1 dock worker, config specifies %d\n", d.Workers)
+	}
+
 	for i := 0; i < d.Workers; i++ {
 		dw := NewDockWorker()
 		d.WorkerList = append(d.WorkerList, dw)
@@ -93,11 +115,6 @@ func (d *Dock) Run(msg <-chan []byte) {
 	}
 
 	d.Done <- struct{}{}
-}
-
-type DockWorker struct {
-	Quit chan struct{}
-	Done chan struct{}
 }
 
 func NewDockWorker() *DockWorker {
@@ -124,7 +141,10 @@ func (dw *DockWorker) Work(d *Dock, msg <-chan []byte) {
 			d.Ships.NewShip(p.Metadata.MMSI)
 
 			d.Ships.UpdateMetadata(p.Metadata)
-			d.Ships.UpdateHistory(p.Metadata.MMSI, []float64{p.Metadata.Latitude, p.Metadata.Longitude})
+
+			if d.ShipHistory {
+				d.Ships.UpdateHistory(p.Metadata.MMSI, []float64{p.Metadata.Latitude, p.Metadata.Longitude})
+			}
 
 			switch p.MsgType {
 			case "PositionReport":
@@ -162,6 +182,7 @@ func (s *Ships) UpdateMetadata(m aisstream.Metadata) {
 	s.StateLock.Lock()
 	defer s.StateLock.Unlock()
 
+	s.State[m.MMSI].MMSI = m.MMSI
 	s.State[m.MMSI].Name = m.ShipName
 	s.State[m.MMSI].LatLon = []float64{m.Latitude, m.Longitude}
 	s.State[m.MMSI].LastUpdate = time.Now().UTC().Unix()

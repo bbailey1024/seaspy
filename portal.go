@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 type Portal struct {
@@ -19,7 +21,7 @@ type Google struct {
 	Api string `json:"api"`
 }
 
-func ListenAndServe(p Portal, dock *Dock, g Google) *http.Server {
+func ListenAndServe(ctx context.Context, dock *Dock, p Portal, g Google) {
 
 	mux := http.NewServeMux()
 
@@ -56,7 +58,15 @@ func ListenAndServe(p Portal, dock *Dock, g Google) *http.Server {
 			log.Fatalf("http server failed: %v\n", err.Error())
 		}
 	}()
-	return server
+
+	<-ctx.Done()
+
+	serverCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := server.Shutdown(serverCtx)
+	if err != nil {
+		fmt.Printf("http server failed to shutdown: %s\n", err.Error())
+	}
 }
 
 func index(w http.ResponseWriter, _ *http.Request, htmlDir string, g Google) {
@@ -118,6 +128,12 @@ func shipDump(w http.ResponseWriter, _ *http.Request, d *Dock) {
 }
 
 func shipHistory(w http.ResponseWriter, r *http.Request, d *Dock) {
+
+	if !d.ShipHistory {
+		fmt.Fprint(w, "[]")
+		return
+	}
+
 	mmsiStr := r.PathValue("mmsi")
 	if mmsiStr == "" {
 		w.WriteHeader(http.StatusNotFound)
