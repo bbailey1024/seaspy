@@ -68,14 +68,3 @@ Sea Spy is designed to track hundreds of thousands of vessels via Google Maps wi
    * Puts more work on server, and requires new data structure(s) for ship storage
    * May allow per tile redraws to animate ships (clearRect and redraw after api pull)
 * Implement additional AIS message types and associated features (Currently only position report and ship static data messages are utilized)
-
-### 1.1 Changes
-~~Switch to signal.NotifyContext and pass context to ListenAndServe~~
-~~Add toggle for ship history~~
-~~Add configurable element for dock worker count~~
-~~Add MMSI value to State~~
-~~Adjust JS code related to mmsi not existing in ship object~~
-Implemented tile redraws
-   Add server data structure to store sorted geospatial data of vessels (i.e., geohash+geocache)
-   Add API that takes a bounding box and returns number of ships in that area
-   Add per tile vessel update, followed by per tile redraws, finishing with all clipping redraws
