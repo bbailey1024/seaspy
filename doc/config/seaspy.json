@@ -1,4 +1,8 @@
 {
+    "dock": {
+        "shipHistory": true,
+        "workerCount": 10
+    },
     "portal": {
         "listenAddr": "127.0.0.1:8080",
         "htmlDir": "./html"
