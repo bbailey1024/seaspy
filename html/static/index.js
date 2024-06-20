@@ -17,10 +17,10 @@ class SeaSpyOverlay extends google.maps.OverlayView {
 
     onAdd() {
         this.div = document.createElement("div");
-        this.div.id = "overlayMouseTarget";
         this.div.style.borderStyle = "none";
         this.div.style.borderWidth = "0px";
         this.div.style.position = "absolute";
+        this.div.classList.add("overlayMouseTarget");
         this.div.appendChild(this.canvas);
 
         const panes = this.getPanes();
@@ -86,9 +86,11 @@ class SeaSpyMapType {
 
     releaseTile(tile) {
         // There is an issue where tiles are released immediately after loading.
-        // This is inconsistent, but only occurs on page refresh.
+        // This is inconsistent, but likely occurs due to marker draw time.
         // To address this, tiles are only released if they are active.
-        // This value is set to 0 during getTile and 1 in the tilesloaded listener.
+        // This value is set to 0 during getTile and 1 in the drawTile function.
+        // This issue also requires a manual cleanup of orphaned overlayMouseTarget divs.
+        // This is implemented in the zoom_changed event by destroying all overlayMouseTarget divs.
         if (this.state.active.get(tile.id) === 1) {
             this.state.shapes.delete(tile.id);
             this.state.tileIdToDetails.delete(tile.id);
@@ -97,11 +99,6 @@ class SeaSpyMapType {
             if (this.state.overlays.has(tile.id)) {
                 this.state.overlays.get(tile.id).setMap(null);
                 this.state.overlays.delete(tile.id);
-            }
-
-            if (this.state.interval.has(tile.id)) {
-                clearInterval(this.state.interval.get(tile.id));
-                this.state.interval.delete(tile.id)
             }
         }
     }
@@ -138,7 +135,6 @@ async function seaspy() {
         tileIdToDetails: new Map(),
         clipBuffer: new Map(),
         active: new Map(),
-        interval: new Map(),
     };
 
     const seaspyMap = new SeaSpyMapType(gmap, state, ships);
@@ -148,84 +144,90 @@ async function seaspy() {
     search.addEventListener("input", debounce((e) => {
         searchHandler(e.target.value, gmap, ships)
     }, 500));
-    
-    google.maps.event.addListener(gmap, 'zoom_changed', function() {
-        for (let [tileId, overlay] of state.overlays) {
-            overlay.setMap(null);
-            state.overlays.delete(tileId);
-        }
 
-        for (let [tileId, intervalId] of state.interval) {
-            clearInterval(intervalId);
-            state.interval.delete(tileId);
-        }
+    setInterval(async function(){
+        drawTiles(state, ships);
+    }, 10000);
+
+    google.maps.event.addListener(gmap, 'zoom_changed', function() {
+        stateCleanup(state);
     });
 
     google.maps.event.addListener(gmap, 'tilesloaded', async function() {
-
-        const tileData = new Map();
-        await Promise.all(
-            state.tileIdToDetails.entries().map(async ([tileId, { bounds }]) => {
-                const data = await getShipsBbox(bounds);
-                tileData.set(tileId, data);
-            })
-        );
-
-        for (let [tileId, tileDetails] of state.tileIdToDetails) {
-
-            state.active.set(tileId, 1);
-
-            // May occur on request failure or zooming before request is finished.
-            if (!tileData.has(tileId)) {
-                continue;
-            }
-            
-            let tileShips = tileData.get(tileId);
-
-            // getShipsBbox returns an array of ships, sorted by geohash.
-            // Plotting shapes in this order will result shape overlap that is not aesthetically pleasing.
-            // Sorting by mmsi will plot shapes in a manner that lacks geospatial awareness.
-            tileShips.sort((a,b) => a.mmsi - b.mmsi);
-            
-            for (let ship of tileShips) {
-                let shipGroup = getShipGroup(ships, ship.shipType);
-                addShipMarker(state, shipGroup, ship, tileId);
-            }
-            
-            const intervalId = setInterval(async function(){
-                // Tile has been released.
-                if (!state.tileIdToDetails.has(tileId)) {
-                    return;
-                }
-
-                let tileShips = await getShipsBbox(tileDetails.bounds);
-
-                if (!tileShips) {
-                    return;
-                }
-
-                tileShips.sort((a,b) => a.mmsi - b.mmsi);
-    
-                let ctx = tileDetails.canvas.getContext("2d");
-                ctx.clearRect(0, 0, tileDetails.canvas.width, tileDetails.canvas.height);
-
-                state.shapes.set(tileId, []);
-
-                for (let ship of tileShips) {
-                    let shipGroup = getShipGroup(ships, ship.shipType);
-                    addShipMarker(state, shipGroup, ship, tileId);
-                }
-
-                drawClipBuffer(state, tileId);
-            }, 10000);
-
-            state.interval.set(tileId, intervalId);
-        }
-
-        for (let [tileId] of state.tileIdToDetails) {
-            drawClipBuffer(state, tileId);
-        }
+        drawTiles(state, ships);
     });
+
+    // TODO // Click around and make sure shapes work as intended with new refresh
+    // TODO // Remove ships.map and /ships API call
+    // TODO // Adjust other functionality that still uses ships.map
+
+}
+
+// stateCleanup performs cleanup of state on zoom change as all prior tiles have been destroyed.
+// See note in releaseTile for why manual cleanup of overlayMouseTarget divs is required.
+function stateCleanup(state) {
+    for (let [tileId, overlay] of state.overlays) {
+        overlay.setMap(null);
+        state.overlays.delete(tileId);
+    }
+
+    let overlayDivs = document.getElementsByClassName("overlayMouseTarget");
+    while (overlayDivs.length > 0) {
+        overlayDivs[0].parentNode.removeChild(overlayDivs[0]);
+    }
+
+    state.shapes = new Map();
+    state.tileIdToDetails = new Map();
+    state.clipBuffer = new Map();
+    state.active = new Map();
+}
+
+// drawTiles draws ship markers based on latlng bounding box of the tile.
+// Tiles are drawn in reverse then forward order to ensure ship clips are drawn reliably.
+async function drawTiles(state, ships) {
+    const tileData = new Map();
+    await Promise.all(
+        state.tileIdToDetails.entries().map(async ([tileId, { bounds }]) => {
+            const data = await getShipsBbox(bounds);
+            tileData.set(tileId, data);
+        })
+    );
+
+    for (let [tileId, tileDetails] of state.tileIdToDetails) {
+        state.active.set(tileId) == 1;
+
+        if (!tileData.has(tileId)) {
+            continue;
+        }
+
+        let tileShips = tileData.get(tileId);
+
+        let ctx = tileDetails.canvas.getContext("2d");
+        ctx.clearRect(0, 0, tileDetails.canvas.width, tileDetails.canvas.height);
+        state.shapes.set(tileId, []);
+
+        for (let ship of tileShips) {
+            let shipGroup = getShipGroup(ships, ship.shipType);
+            addShipMarker(state, shipGroup, ship, tileId);
+        }
+        drawClipBuffer(state, tileId);
+    }
+
+    for (let [tileId] of [...state.tileIdToDetails].reverse()) {
+        if (!tileData.has(tileId)) {
+            return;
+        }
+
+        let tileShips = tileData.get(tileId);
+
+        for (let ship of tileShips) {
+            let shipGroup = getShipGroup(ships, ship.shipType);
+            addShipMarker(state, shipGroup, ship, tileId);
+        }
+        drawClipBuffer(state, tileId); 
+    }
+
+
 }
 
 function searchHandler(q, gmap, ships) {
@@ -399,7 +401,7 @@ async function drawClipBuffer(state, tileId) {
 
 async function canvasClick(shapes, ships, ctx, gmap, e) {
     var mmsi;
-    for (let i = 0; i < shapes.length; i++) {
+    for (let i = shapes.length - 1; i >= 0; i--) {
         if (ctx.isPointInPath(shapes[i].path, e.offsetX, e.offsetY)) {
             mmsi = shapes[i].mmsi;
             break;
@@ -481,17 +483,13 @@ async function getShips() {
     return data;
 }
 
+// getShipsBbox returns an array of ships, sorted by geohash.
+// Plotting shapes in this order will result shape overlap that is not aesthetically pleasing.
+// Sorting by mmsi will plot shapes in a manner that lacks geospatial awareness.
 async function getShipsBbox(bounds) {
     const uri = `/ships/${bounds.sw.lat},${bounds.sw.lng}/${bounds.ne.lat},${bounds.ne.lng}`
     const { data } = await axiosInstance.get(uri);
-    return data;
-}
-
-async function getShipsBboxMap(bounds) {
-    const uri = `/shipsMap/${bounds.sw.lat},${bounds.sw.lng}/${bounds.ne.lat},${bounds.ne.lng}`
-    // const { data } = await axiosInstance.get(uri);
-    const data = await axiosInstance.get(uri);
-    console.log(data);
+    data.sort((a,b) => a.mmsi - b.mmsi);
     return data;
 }
 

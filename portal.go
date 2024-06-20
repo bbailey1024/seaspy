@@ -54,9 +54,6 @@ func ListenAndServe(ctx context.Context, dock *Dock, p Portal, g Google) {
 	mux.HandleFunc("GET /ships/{sw}/{ne}", func(w http.ResponseWriter, r *http.Request) {
 		shipsBbox(w, r, dock)
 	})
-	mux.HandleFunc("GET /shipsMap/{sw}/{ne}", func(w http.ResponseWriter, r *http.Request) {
-		shipsBboxMap(w, r, dock)
-	})
 
 	mux.HandleFunc("GET /shipTypes", shipTypes)
 	mux.HandleFunc("GET /shipGroups", shipGroups)
@@ -195,47 +192,7 @@ func shipsBbox(w http.ResponseWriter, r *http.Request, d *Dock) {
 		return
 	}
 
-	b, err := json.Marshal(res)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-	}
-
-	fmt.Fprint(w, string(b))
-}
-
-func shipsBboxMap(w http.ResponseWriter, r *http.Request, d *Dock) {
-
-	sw := strings.Split(r.PathValue("sw"), ",")
-	ne := strings.Split(r.PathValue("ne"), ",")
-
-	if len(sw) != 2 || len(ne) != 2 {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	bbox, err := generateBbox(sw, ne)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	res, err := d.Ships.GetShipsInBoxDebug(bbox, d.Geocache)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	resMap := make(map[int]*State)
-	for _, ship := range res {
-		resMap[ship.MMSI] = ship
-	}
-
-	b, err := json.Marshal(resMap)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-	}
-
-	fmt.Fprint(w, string(b))
+	fmt.Fprint(w, res)
 }
 
 func shipTypes(w http.ResponseWriter, _ *http.Request) {

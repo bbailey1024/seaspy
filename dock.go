@@ -378,21 +378,19 @@ func (s *Ships) GetShipsInBox(bbox [2][2]float64, geocache *Geocache) (string, e
 	return string(b), nil
 }
 
-func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) ([]*State, error) {
+func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) (string, error) {
 
 	if !validBbox(bbox) {
-		// return "", fmt.Errorf("bounding box out of range")
-		return nil, fmt.Errorf("bounding box out of range")
+		return "", fmt.Errorf("bounding box out of range")
 	}
 
-	// totalTime := time.Now()
+	totalTime := time.Now()
 
-	// binaryTime := time.Now()
+	binaryTime := time.Now()
 
 	begin, end, err := geocache.BinarySearch(bbox)
 	if err != nil {
-		// return "", err
-		return nil, err
+		return "", err
 	}
 
 	// If begin is greater than end, ship results should loop around geocache list.
@@ -410,13 +408,13 @@ func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) ([]*S
 		}
 	}
 
-	// fmt.Printf("binary search: %dμs\n", time.Since(binaryTime).Microseconds())
+	fmt.Printf("binary search: %dμs\n", time.Since(binaryTime).Microseconds())
 
 	shipsInCoords := make([]*State, 0)
 
 	s.StateLock.RLock()
 
-	// fineTime := time.Now()
+	fineTime := time.Now()
 
 	for _, mmsi := range binaryShipResults {
 		ship := s.State[mmsi]
@@ -425,12 +423,12 @@ func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) ([]*S
 		}
 	}
 
-	// fmt.Printf("fine search  : %dμs\n", time.Since(fineTime).Microseconds())
+	fmt.Printf("fine search  : %dμs\n", time.Since(fineTime).Microseconds())
 
 	// This list contains all ships within the bbox by iterating over every one of them.
 	// Used to validate results from binary search.
 	// This should go into a debug function when moved into the seaspy program.
-	// controlTime := time.Now()
+	controlTime := time.Now()
 	var controlList []int
 	for mmsi, ship := range s.State {
 		if ship.LatLon[0] >= bbox[0][0] && ship.LatLon[0] < bbox[1][0] && ship.LatLon[1] >= bbox[0][1] && ship.LatLon[1] < bbox[1][1] {
@@ -440,20 +438,20 @@ func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) ([]*S
 		}
 	}
 
-	// fmt.Printf("ctrl search  : %dμs\n", time.Since(controlTime).Microseconds())
+	fmt.Printf("ctrl search  : %dμs\n", time.Since(controlTime).Microseconds())
 
 	s.StateLock.RUnlock()
 
-	// marshalTime := time.Now()
+	marshalTime := time.Now()
 
-	// b, err := json.Marshal(shipsInCoords)
-	// if err != nil {
-	// 	return "", fmt.Errorf("failed to marshal ships in box: %w", err)
-	// }
+	b, err := json.Marshal(shipsInCoords)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal ships in box: %w", err)
+	}
 
-	// fmt.Printf("marshal time : %dμs\n", time.Since(marshalTime).Microseconds())
+	fmt.Printf("marshal time : %dμs\n", time.Since(marshalTime).Microseconds())
 
-	// fmt.Printf("total time   : %dμs\n", time.Since(totalTime).Microseconds())
+	fmt.Printf("total time   : %dμs, total ships: %d\n", time.Since(totalTime).Microseconds(), len(shipsInCoords))
 
 	missing := 0
 	for _, mmsi := range controlList {
@@ -465,8 +463,7 @@ func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) ([]*S
 		fmt.Printf("of the %d binary results, %d from the control group are missing\n", len(binaryShipResults), missing)
 	}
 
-	return shipsInCoords, nil
-	// return string(b), nil
+	return string(b), nil
 }
 
 func validBbox(bbox [2][2]float64) bool {
