@@ -9,8 +9,6 @@ const axiosInstance = axios.create({
 });
 
 class SeaSpyOverlay extends google.maps.OverlayView {
-    bounds;
-    canvas;
     constructor(bounds, canvas) {
       super();
       this.bounds = bounds;
@@ -62,7 +60,7 @@ class SeaSpyMapType {
         let tileId = `${coord.x},${coord.y}`;
 
         const canvas = document.createElement('canvas');
-        canvas.id = `canvas_${tileId}`;
+        canvas.id = `${tileId}`;
         canvas.width = tileSize;
         canvas.height = tileSize;
         canvas.addEventListener("click", async (e) => {
@@ -79,9 +77,33 @@ class SeaSpyMapType {
         this.state.shapes.set(tileId, []);
 
         this.state.tileIdToDetails.set(tileId, { bounds: bounds, coord: coord, canvas: canvas, zoom: zoom, size: tileSize });
-        this.state.overlays.set(canvas, canvasOverlay);
+        this.state.overlays.set(tileId, canvasOverlay);
+
+        this.state.active.set(tileId, 0);
 
         return canvas;
+    }
+
+    releaseTile(tile) {
+        // There is an issue where tiles are released immediately after loading.
+        // This is inconsistent, but only occurs on page refresh.
+        // To address this, tiles are only released if they are active.
+        // This value is set to 0 during getTile and 1 in the tilesloaded listener.
+        if (this.state.active.get(tile.id) === 1) {
+            this.state.shapes.delete(tile.id);
+            this.state.tileIdToDetails.delete(tile.id);
+            this.state.clipBuffer.delete(tile.id);
+
+            if (this.state.overlays.has(tile.id)) {
+                this.state.overlays.get(tile.id).setMap(null);
+                this.state.overlays.delete(tile.id);
+            }
+
+            if (this.state.interval.has(tile.id)) {
+                clearInterval(this.state.interval.get(tile.id));
+                this.state.interval.delete(tile.id)
+            }
+        }
     }
 }
 
@@ -115,6 +137,8 @@ async function seaspy() {
         overlays: new Map(),
         tileIdToDetails: new Map(),
         clipBuffer: new Map(),
+        active: new Map(),
+        interval: new Map(),
     };
 
     const seaspyMap = new SeaSpyMapType(gmap, state, ships);
@@ -126,45 +150,81 @@ async function seaspy() {
     }, 500));
     
     google.maps.event.addListener(gmap, 'zoom_changed', function() {
-        state.clipBuffer = new Map();
-
-        for (let [k, overlay] of state.overlays) {
+        for (let [tileId, overlay] of state.overlays) {
             overlay.setMap(null);
-            state.overlays.delete(k);
+            state.overlays.delete(tileId);
+        }
+
+        for (let [tileId, intervalId] of state.interval) {
+            clearInterval(intervalId);
+            state.interval.delete(tileId);
         }
     });
 
-    google.maps.event.addListener(gmap, 'tilesloaded', function() {
+    google.maps.event.addListener(gmap, 'tilesloaded', async function() {
 
-        for (let mmsi in ships.map) {
-            let ship = ships.map[mmsi];
-            let latlng = {lat: ship.latlon[0], lng: ship.latlon[1]};
+        const tileData = new Map();
+        await Promise.all(
+            state.tileIdToDetails.entries().map(async ([tileId, { bounds }]) => {
+                const data = await getShipsBbox(bounds);
+                tileData.set(tileId, data);
+            })
+        );
 
-            // AIS without names clutter the map, consider adding frontend filter option
-            if (!ship.name) {
+        for (let [tileId, tileDetails] of state.tileIdToDetails) {
+
+            state.active.set(tileId, 1);
+
+            // May occur on request failure or zooming before request is finished.
+            if (!tileData.has(tileId)) {
                 continue;
             }
+            
+            let tileShips = tileData.get(tileId);
 
-            // AIS sending undefined latlng, consider moving to backend to filter
-            if (latlng.lat.toFixed(4) == 0.0000 && latlng.lng.toFixed(4) == 0.0000) {
-                continue;
+            // getShipsBbox returns an array of ships, sorted by geohash.
+            // Plotting shapes in this order will result shape overlap that is not aesthetically pleasing.
+            // Sorting by mmsi will plot shapes in a manner that lacks geospatial awareness.
+            tileShips.sort((a,b) => a.mmsi - b.mmsi);
+            
+            for (let ship of tileShips) {
+                let shipGroup = getShipGroup(ships, ship.shipType);
+                addShipMarker(state, shipGroup, ship, tileId);
             }
-
-            for (let [tileId, tileDetails] of state.tileIdToDetails) {
-                if (!inBoundingBox(tileDetails.bounds, latlng)) {
-                    continue;
+            
+            const intervalId = setInterval(async function(){
+                // Tile has been released.
+                if (!state.tileIdToDetails.has(tileId)) {
+                    return;
                 }
 
-                addShipMarker(state, ships, ship, tileId);
-            }
+                let tileShips = await getShipsBbox(tileDetails.bounds);
+
+                if (!tileShips) {
+                    return;
+                }
+
+                tileShips.sort((a,b) => a.mmsi - b.mmsi);
+    
+                let ctx = tileDetails.canvas.getContext("2d");
+                ctx.clearRect(0, 0, tileDetails.canvas.width, tileDetails.canvas.height);
+
+                state.shapes.set(tileId, []);
+
+                for (let ship of tileShips) {
+                    let shipGroup = getShipGroup(ships, ship.shipType);
+                    addShipMarker(state, shipGroup, ship, tileId);
+                }
+
+                drawClipBuffer(state, tileId);
+            }, 10000);
+
+            state.interval.set(tileId, intervalId);
         }
 
         for (let [tileId] of state.tileIdToDetails) {
             drawClipBuffer(state, tileId);
         }
-
-        // Empty the tile map to eliminate overlapping/duplicate bounding boxes as new tiles load.
-        state.tileIdToDetails = new Map();
     });
 }
 
@@ -271,9 +331,16 @@ async function openShipHistory(gmap, ships, mmsi) {
     ships.route.setMap(gmap);
 }
 
-async function addShipMarker(state, ships, ship, tileId) {
-    let shipGroup = getShipGroup(ships, ship.shipType);
+async function addShipMarker(state, shipGroup, ship, tileId) {
     let latlng = {lat: ship.latlon[0], lng: ship.latlon[1]};
+
+    if (!ship.name) {
+        return;
+    }
+
+    if (latlng.lat.toFixed(4) == 0.0000 && latlng.lng.toFixed(4) == 0.0000) {
+        return;
+    }
 
     let tile = state.tileIdToDetails.get(tileId);
     let centerPoint = fromLatLngToTilePixel(latlng, tile.size, tile.zoom);
@@ -411,6 +478,20 @@ function friendlyTime(lastUpdate) {
 
 async function getShips() {
     const { data } = await axiosInstance.get("/ships");
+    return data;
+}
+
+async function getShipsBbox(bounds) {
+    const uri = `/ships/${bounds.sw.lat},${bounds.sw.lng}/${bounds.ne.lat},${bounds.ne.lng}`
+    const { data } = await axiosInstance.get(uri);
+    return data;
+}
+
+async function getShipsBboxMap(bounds) {
+    const uri = `/shipsMap/${bounds.sw.lat},${bounds.sw.lng}/${bounds.ne.lat},${bounds.ne.lng}`
+    // const { data } = await axiosInstance.get(uri);
+    const data = await axiosInstance.get(uri);
+    console.log(data);
     return data;
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -46,6 +47,15 @@ func ListenAndServe(ctx context.Context, dock *Dock, p Portal, g Google) {
 	})
 	mux.HandleFunc("GET /shipHistory/{mmsi}", func(w http.ResponseWriter, r *http.Request) {
 		shipHistory(w, r, dock)
+	})
+	mux.HandleFunc("GET /geoList", func(w http.ResponseWriter, r *http.Request) {
+		geoList(w, r, dock)
+	})
+	mux.HandleFunc("GET /ships/{sw}/{ne}", func(w http.ResponseWriter, r *http.Request) {
+		shipsBbox(w, r, dock)
+	})
+	mux.HandleFunc("GET /shipsMap/{sw}/{ne}", func(w http.ResponseWriter, r *http.Request) {
+		shipsBboxMap(w, r, dock)
 	})
 
 	mux.HandleFunc("GET /shipTypes", shipTypes)
@@ -154,6 +164,80 @@ func shipHistory(w http.ResponseWriter, r *http.Request, d *Dock) {
 	fmt.Fprint(w, res)
 }
 
+func geoList(w http.ResponseWriter, _ *http.Request, d *Dock) {
+	b, err := json.Marshal(d.Geocache.List)
+	if err != nil {
+		log.Fatalf("geoList handler failed: %s\n", err.Error())
+	}
+
+	fmt.Fprint(w, string(b))
+}
+
+func shipsBbox(w http.ResponseWriter, r *http.Request, d *Dock) {
+
+	sw := strings.Split(r.PathValue("sw"), ",")
+	ne := strings.Split(r.PathValue("ne"), ",")
+
+	if len(sw) != 2 || len(ne) != 2 {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	bbox, err := generateBbox(sw, ne)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	res, err := d.Ships.GetShipsInBoxDebug(bbox, d.Geocache)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	b, err := json.Marshal(res)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+	}
+
+	fmt.Fprint(w, string(b))
+}
+
+func shipsBboxMap(w http.ResponseWriter, r *http.Request, d *Dock) {
+
+	sw := strings.Split(r.PathValue("sw"), ",")
+	ne := strings.Split(r.PathValue("ne"), ",")
+
+	if len(sw) != 2 || len(ne) != 2 {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	bbox, err := generateBbox(sw, ne)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	res, err := d.Ships.GetShipsInBoxDebug(bbox, d.Geocache)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	resMap := make(map[int]*State)
+	for _, ship := range res {
+		resMap[ship.MMSI] = ship
+	}
+
+	b, err := json.Marshal(resMap)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+	}
+
+	fmt.Fprint(w, string(b))
+}
+
 func shipTypes(w http.ResponseWriter, _ *http.Request) {
 	b, err := json.Marshal(ShipTypes)
 	if err != nil {
@@ -170,4 +254,32 @@ func shipGroups(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	fmt.Fprint(w, string(b))
+}
+
+func generateBbox(sw []string, ne []string) ([2][2]float64, error) {
+
+	bbox := [2][2]float64{}
+	var err error
+
+	bbox[0][0], err = strconv.ParseFloat(sw[0], 64)
+	if err != nil {
+		return bbox, err
+	}
+
+	bbox[0][1], err = strconv.ParseFloat(sw[1], 64)
+	if err != nil {
+		return bbox, err
+	}
+
+	bbox[1][0], err = strconv.ParseFloat(ne[0], 64)
+	if err != nil {
+		return bbox, err
+	}
+
+	bbox[1][1], err = strconv.ParseFloat(ne[1], 64)
+	if err != nil {
+		return bbox, err
+	}
+
+	return bbox, nil
 }

@@ -1,2 +1,4 @@
+github.com/bbailey1024/geohash v0.1.0 h1:HXZWmCBbdY9Bach6Zh5cQ0iUhlbGGu/u2wvTDy5o1B8=
+github.com/bbailey1024/geohash v0.1.0/go.mod h1:DXG6CY33o6kRF7aHxag5OGWN/KR/BCwcL+SnImzbITo=
 nhooyr.io/websocket v1.8.10 h1:mv4p+MnGrLDcPlBoWsvPP7XCzTYMXP9F9eIGoKbgx7Q=
 nhooyr.io/websocket v1.8.10/go.mod h1:rN9OFWIUwuxg4fR5tELlYC04bXYowCP9GX47ivo2l+c=

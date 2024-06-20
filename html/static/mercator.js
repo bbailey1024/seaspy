@@ -24,7 +24,7 @@ export function getTileBounds(tile, size, zoom) {
     tile = normalizeTile(tile, zoom);
     
     let t = Math.pow(2, zoom);
-    let s = 256 / t;
+    let s = size / t;
     let sw = {
         x: tile.x * s,
         y: (tile.y * s) + s,

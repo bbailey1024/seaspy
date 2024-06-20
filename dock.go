@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
 	"seaspy/aisstream"
+
+	"github.com/bbailey1024/geohash"
 )
 
 const (
@@ -17,12 +20,14 @@ const (
 )
 
 type Dock struct {
-	ShipHistory bool `json:"shipHistory"`
-	Workers     int  `json:"workerCount"`
-	WorkerList  []*DockWorker
-	Quit        chan struct{}
-	Done        chan struct{}
-	Ships       *Ships
+	ShipHistory   bool `json:"shipHistory"`
+	GeocacheTimer int  `json:"geocacheTimer"`
+	Workers       int  `json:"workerCount"`
+	WorkerList    []*DockWorker
+	Quit          chan struct{}
+	Done          chan struct{}
+	Ships         *Ships
+	Geocache      *Geocache
 }
 
 type Ships struct {
@@ -38,6 +43,7 @@ type State struct {
 	MMSI       int       `json:"mmsi"`
 	Name       string    `json:"name"`
 	LatLon     []float64 `json:"latlon"`
+	Geohash    uint64    `json:"geohash"`
 	Heading    int       `json:"heading"`
 	SOG        float64   `json:"sog"`
 	NavStat    int       `json:"navStat"`
@@ -107,7 +113,13 @@ func (d *Dock) Run(msg <-chan []byte) {
 		go dw.Work(d, msg)
 	}
 
+	d.Geocache = NewGeocache(d.GeocacheTimer)
+	go d.Geocache.Run(d.Ships)
+
 	<-d.Quit
+
+	d.Geocache.Quit <- struct{}{}
+	<-d.Geocache.Done
 
 	for _, dw := range d.WorkerList {
 		dw.Quit <- struct{}{}
@@ -138,9 +150,14 @@ func (dw *DockWorker) Work(d *Dock, msg <-chan []byte) {
 				continue
 			}
 
-			d.Ships.NewShip(p.Metadata.MMSI)
+			if p.Metadata.MMSI == 0 {
+				continue
+			}
 
+			d.Ships.StateLock.Lock()
+			d.Ships.NewShip(p.Metadata.MMSI)
 			d.Ships.UpdateMetadata(p.Metadata)
+			d.Ships.StateLock.Unlock()
 
 			if d.ShipHistory {
 				d.Ships.UpdateHistory(p.Metadata.MMSI, []float64{p.Metadata.Latitude, p.Metadata.Longitude})
@@ -159,11 +176,9 @@ func (dw *DockWorker) Work(d *Dock, msg <-chan []byte) {
 }
 
 func (s *Ships) NewShip(mmsi int) {
-	s.StateLock.Lock()
 	if _, ok := s.State[mmsi]; !ok {
 		s.State[mmsi] = &State{}
 	}
-	s.StateLock.Unlock()
 
 	s.InfoLock.Lock()
 	if _, ok := s.Info[mmsi]; !ok {
@@ -179,13 +194,11 @@ func (s *Ships) NewShip(mmsi int) {
 }
 
 func (s *Ships) UpdateMetadata(m aisstream.Metadata) {
-	s.StateLock.Lock()
-	defer s.StateLock.Unlock()
-
 	s.State[m.MMSI].MMSI = m.MMSI
 	s.State[m.MMSI].Name = m.ShipName
 	s.State[m.MMSI].LatLon = []float64{m.Latitude, m.Longitude}
-	s.State[m.MMSI].LastUpdate = time.Now().UTC().Unix()
+	s.State[m.MMSI].Geohash = geohash.EncodeInt(s.State[m.MMSI].LatLon[0], s.State[m.MMSI].LatLon[1])
+	s.State[m.MMSI].LastUpdate = time.Now().Unix()
 }
 
 func (s *Ships) UpdatePositionReport(mmsi int, m aisstream.PositionReport) {
@@ -328,4 +341,143 @@ func (s *Ships) GetShipDump() (string, error) {
 	}
 
 	return string(b), nil
+}
+
+func (s *Ships) GetShipsInBox(bbox [2][2]float64, geocache *Geocache) (string, error) {
+
+	if !validBbox(bbox) {
+		return "", fmt.Errorf("bounding box out of range")
+	}
+
+	begin, end, err := geocache.BinarySearch(bbox)
+	if err != nil {
+		return "", err
+	}
+
+	binaryShipResults := make([]int, 0, end-begin)
+	for i := begin; i <= end; i++ {
+		binaryShipResults = append(binaryShipResults, geocache.List[i].MMSI)
+	}
+
+	var shipsInCoords []*State
+
+	s.StateLock.RLock()
+	for _, mmsi := range binaryShipResults {
+		ship := s.State[mmsi]
+		if ship.LatLon[0] >= bbox[0][0] && ship.LatLon[0] < bbox[1][0] && ship.LatLon[1] >= bbox[0][1] && ship.LatLon[1] < bbox[1][1] {
+			shipsInCoords = append(shipsInCoords, ship)
+		}
+	}
+	s.StateLock.RUnlock()
+
+	b, err := json.Marshal(shipsInCoords)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal ships in box: %w", err)
+	}
+
+	return string(b), nil
+}
+
+func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) ([]*State, error) {
+
+	if !validBbox(bbox) {
+		// return "", fmt.Errorf("bounding box out of range")
+		return nil, fmt.Errorf("bounding box out of range")
+	}
+
+	// totalTime := time.Now()
+
+	// binaryTime := time.Now()
+
+	begin, end, err := geocache.BinarySearch(bbox)
+	if err != nil {
+		// return "", err
+		return nil, err
+	}
+
+	// If begin is greater than end, ship results should loop around geocache list.
+	var binaryShipResults []int
+	if begin > end {
+		for i := begin; i < len(geocache.List); i++ {
+			binaryShipResults = append(binaryShipResults, geocache.List[i].MMSI)
+		}
+		for i := 0; i <= end; i++ {
+			binaryShipResults = append(binaryShipResults, geocache.List[i].MMSI)
+		}
+	} else {
+		for i := begin; i <= end; i++ {
+			binaryShipResults = append(binaryShipResults, geocache.List[i].MMSI)
+		}
+	}
+
+	// fmt.Printf("binary search: %dμs\n", time.Since(binaryTime).Microseconds())
+
+	shipsInCoords := make([]*State, 0)
+
+	s.StateLock.RLock()
+
+	// fineTime := time.Now()
+
+	for _, mmsi := range binaryShipResults {
+		ship := s.State[mmsi]
+		if ship.LatLon[0] >= bbox[0][0] && ship.LatLon[0] < bbox[1][0] && ship.LatLon[1] >= bbox[0][1] && ship.LatLon[1] < bbox[1][1] {
+			shipsInCoords = append(shipsInCoords, ship)
+		}
+	}
+
+	// fmt.Printf("fine search  : %dμs\n", time.Since(fineTime).Microseconds())
+
+	// This list contains all ships within the bbox by iterating over every one of them.
+	// Used to validate results from binary search.
+	// This should go into a debug function when moved into the seaspy program.
+	// controlTime := time.Now()
+	var controlList []int
+	for mmsi, ship := range s.State {
+		if ship.LatLon[0] >= bbox[0][0] && ship.LatLon[0] < bbox[1][0] && ship.LatLon[1] >= bbox[0][1] && ship.LatLon[1] < bbox[1][1] {
+			if ship.LastUpdate < geocache.LastUpdate {
+				controlList = append(controlList, mmsi)
+			}
+		}
+	}
+
+	// fmt.Printf("ctrl search  : %dμs\n", time.Since(controlTime).Microseconds())
+
+	s.StateLock.RUnlock()
+
+	// marshalTime := time.Now()
+
+	// b, err := json.Marshal(shipsInCoords)
+	// if err != nil {
+	// 	return "", fmt.Errorf("failed to marshal ships in box: %w", err)
+	// }
+
+	// fmt.Printf("marshal time : %dμs\n", time.Since(marshalTime).Microseconds())
+
+	// fmt.Printf("total time   : %dμs\n", time.Since(totalTime).Microseconds())
+
+	missing := 0
+	for _, mmsi := range controlList {
+		if !slices.Contains(binaryShipResults, mmsi) {
+			missing++
+		}
+	}
+	if missing > 0 {
+		fmt.Printf("of the %d binary results, %d from the control group are missing\n", len(binaryShipResults), missing)
+	}
+
+	return shipsInCoords, nil
+	// return string(b), nil
+}
+
+func validBbox(bbox [2][2]float64) bool {
+
+	if bbox[0][0] > LATMAX || bbox[0][0] < LATMIN || bbox[1][0] > LATMAX || bbox[1][0] < LATMIN {
+		return false
+	}
+
+	if bbox[0][1] > LNGMAX || bbox[0][1] < LNGMIN || bbox[1][1] > LNGMAX || bbox[1][1] < LNGMIN {
+		return false
+	}
+
+	return true
 }
