@@ -14,12 +14,27 @@ const (
 	LNGMIN = -180.0
 )
 
+type Cache struct {
+	Timer  int
+	Geo    *Geocache
+	Search *Searchcache
+	Quit   chan struct{}
+	Done   chan struct{}
+}
+
+type Searchcache struct {
+	List []SearchFields
+}
+
+type SearchFields struct {
+	MMSI   int       `json:"mmsi"`
+	Name   string    `json:"name"`
+	LatLon []float64 `json:"latlon"`
+}
+
 type Geocache struct {
-	Timer      int
 	List       []GeoMMSI
 	LastUpdate int64
-	Quit       chan struct{}
-	Done       chan struct{}
 }
 
 type GeoMMSI struct {
@@ -27,37 +42,67 @@ type GeoMMSI struct {
 	Geohash uint64
 }
 
-func NewGeocache(t int) *Geocache {
-	return &Geocache{
-		Timer:      t,
-		List:       []GeoMMSI{},
-		LastUpdate: 0,
-		Quit:       make(chan struct{}),
-		Done:       make(chan struct{}),
+func NewCache(t int) *Cache {
+	return &Cache{
+		Timer:  t,
+		Geo:    NewGeocache(),
+		Search: NewSearchcache(),
+		Quit:   make(chan struct{}),
+		Done:   make(chan struct{}),
 	}
 }
 
-func (gc *Geocache) Run(s *Ships) {
+func NewSearchcache() *Searchcache {
+	return &Searchcache{
+		List: []SearchFields{},
+	}
+}
+
+func NewGeocache() *Geocache {
+	return &Geocache{
+		List:       []GeoMMSI{},
+		LastUpdate: 0,
+	}
+}
+
+func (c *Cache) Run(s *Ships) {
 
 	// Generate every second for the first five seconds.
 	for i := 0; i < 5; i++ {
-		gc.Generate(s)
+		c.Geo.Generate(s)
+		c.Search.Generate(s)
 		time.Sleep(time.Second * 1)
 	}
 
-	ticker := time.NewTicker(time.Duration(gc.Timer) * time.Second)
+	ticker := time.NewTicker(time.Duration(c.Timer) * time.Second)
 
 	for {
 		select {
 		case <-ticker.C:
-			// n := time.Now()
-			gc.Generate(s)
-			// fmt.Printf("ships: %d, geocache generation: %dμs\n", len(s.State), time.Since(n).Microseconds())
-		case <-gc.Quit:
-			gc.Done <- struct{}{}
+			c.Geo.Generate(s)
+			c.Search.Generate(s)
+		case <-c.Quit:
+			c.Done <- struct{}{}
 			return
 		}
 	}
+}
+
+func (sc *Searchcache) Generate(s *Ships) {
+	s.StateLock.RLock()
+	defer s.StateLock.RUnlock()
+
+	searchList := make([]SearchFields, 0, len(s.State))
+
+	for mmsi, ship := range s.State {
+		searchList = append(searchList, SearchFields{
+			MMSI:   mmsi,
+			Name:   ship.Name,
+			LatLon: ship.LatLon,
+		})
+	}
+
+	sc.List = searchList
 }
 
 func (gc *Geocache) Generate(s *Ships) {

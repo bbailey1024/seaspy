@@ -1,5 +1,5 @@
 import { polyMap, colorMap, drawShape, clipPositions } from './draw.js';
-import { getTileBounds, inBoundingBox, fromLatLngToTilePixel } from './mercator.js';
+import { getTileBounds, fromLatLngToTilePixel } from './mercator.js';
 await google.maps.importLibrary("maps");
 
 const tileSize = 256;
@@ -49,11 +49,11 @@ class SeaSpyOverlay extends google.maps.OverlayView {
 }
 
 class SeaSpyMapType {
-    constructor(gmap, state, ships) {
+    constructor(gmap, state, shipmeta) {
         this.tileSize = new google.maps.Size(tileSize, tileSize);
         this.gmap = gmap;
         this.state = state;
-        this.ships = ships;
+        this.shipmeta = shipmeta;
     }
 
     getTile(coord, zoom) {
@@ -66,7 +66,7 @@ class SeaSpyMapType {
         canvas.addEventListener("click", async (e) => {
             let shapes = this.state.shapes.get(tileId);
             let ctx = canvas.getContext("2d");
-            canvasClick(shapes, this.ships, ctx, this.gmap, e);
+            canvasClick(shapes, this.shipmeta, ctx, this.gmap, e);
         });
 
         const bounds = getTileBounds(coord, tileSize, zoom);
@@ -117,16 +117,15 @@ async function seaspy() {
     });
 
     const shipTypes = await getShipTypes();
-    const shipMap = await getShips();
     const infoWindow = new google.maps.InfoWindow;
     const polyline = new google.maps.Polyline;
 
-    var ships = {
+    var shipmeta = {
         types: shipTypes.types,
         groups: shipTypes.groups,
-        map: shipMap,
         infowindow: infoWindow,
         route: polyline,
+        search: {},
     };
 
     var state = {
@@ -137,16 +136,17 @@ async function seaspy() {
         active: new Map(),
     };
 
-    const seaspyMap = new SeaSpyMapType(gmap, state, ships);
+    const seaspyMap = new SeaSpyMapType(gmap, state, shipmeta);
     gmap.overlayMapTypes.insertAt(0, seaspyMap);
 
     const search = document.getElementById("search");
     search.addEventListener("input", debounce((e) => {
-        searchHandler(e.target.value, gmap, ships)
+        searchHandler(e.target.value, gmap, shipmeta)
     }, 500));
 
     setInterval(async function(){
-        drawTiles(state, ships);
+        drawTiles(state, shipmeta);
+        shipmeta.search = await getSearchCache();
     }, 10000);
 
     google.maps.event.addListener(gmap, 'zoom_changed', function() {
@@ -154,13 +154,9 @@ async function seaspy() {
     });
 
     google.maps.event.addListener(gmap, 'tilesloaded', async function() {
-        drawTiles(state, ships);
+        drawTiles(state, shipmeta);
+        shipmeta.search = await getSearchCache();
     });
-
-    // TODO // Click around and make sure shapes work as intended with new refresh
-    // TODO // Remove ships.map and /ships API call
-    // TODO // Adjust other functionality that still uses ships.map
-
 }
 
 // stateCleanup performs cleanup of state on zoom change as all prior tiles have been destroyed.
@@ -184,7 +180,7 @@ function stateCleanup(state) {
 
 // drawTiles draws ship markers based on latlng bounding box of the tile.
 // Tiles are drawn in reverse then forward order to ensure ship clips are drawn reliably.
-async function drawTiles(state, ships) {
+async function drawTiles(state, shipmeta) {
     const tileData = new Map();
     await Promise.all(
         state.tileIdToDetails.entries().map(async ([tileId, { bounds }]) => {
@@ -207,7 +203,7 @@ async function drawTiles(state, ships) {
         state.shapes.set(tileId, []);
 
         for (let ship of tileShips) {
-            let shipGroup = getShipGroup(ships, ship.shipType);
+            let shipGroup = getShipGroup(shipmeta, ship.shipType);
             addShipMarker(state, shipGroup, ship, tileId);
         }
         drawClipBuffer(state, tileId);
@@ -221,88 +217,91 @@ async function drawTiles(state, ships) {
         let tileShips = tileData.get(tileId);
 
         for (let ship of tileShips) {
-            let shipGroup = getShipGroup(ships, ship.shipType);
+            let shipGroup = getShipGroup(shipmeta, ship.shipType);
             addShipMarker(state, shipGroup, ship, tileId);
         }
         drawClipBuffer(state, tileId); 
     }
-
-
 }
 
-function searchHandler(q, gmap, ships) {
-    let searchResults = document.getElementById("search-results");
-    searchResults.innerHTML = '';
-    searchResults.style.display = 'none';
-
+function searchHandler(q, gmap, shipmeta) {
     if (!q || q.length < 3) {
         return;
     }
 
     let search = q.trim().toLowerCase();
 
-    let resultCounter = 0;
     let resultLimit = 20;
+    let results = [];
 
-    for (let mmsi in ships.map) {
-        let ship = ships.map[mmsi];
-
-        let mmsiMatch = mmsi === search;
+    for (let ship of shipmeta.search) {
+        let mmsiMatch = ship.mmsi === search;
         let shipMatch = false;
         if (ship.name) {
             shipMatch = ship.name.trim().toLowerCase().includes(search);
         }
 
         if (shipMatch || mmsiMatch) {
-            if (resultCounter === resultLimit) {
+            if (results.length >= resultLimit) {
                 break;
             }
-            resultCounter++;
-
-            const resultDiv = document.createElement('div');
-            resultDiv.classList.add('search-result');
-
-            const nameElement = document.createElement('span');
-            nameElement.classList.add('search-result-name');
-            nameElement.innerHTML = ship.name;
-            resultDiv.appendChild(nameElement);
-
-            const mmsiElement = document.createElement('span');
-            mmsiElement.classList.add('search-result-mmsi');
-            mmsiElement.innerHTML = mmsi;
-            resultDiv.appendChild(mmsiElement);
-
-            resultDiv.addEventListener("click", async (e) => {
-                gmap.setCenter({lat: ship.latlon[0], lng: ship.latlon[1]});
-                gmap.setZoom(15);
-                openInfoWindow(gmap, ships, mmsi);
-                openShipHistory(gmap, ships, mmsi);
-            });
-
-            searchResults.appendChild(resultDiv);
+            results.push(ship);
         }
     }
 
-    if (resultCounter > 0) {
+    results.sort((a, b) => {
+        if (a.name < b.name) return -1;
+        if (a.name > b.name) return 1;
+        return 0;
+    });
+
+    let searchResults = document.getElementById("search-results");
+    searchResults.innerHTML = '';
+    searchResults.style.display = 'none';
+
+    for (let r of results) {
+        const resultDiv = document.createElement('div');
+        resultDiv.classList.add('search-result');
+
+        const nameElement = document.createElement('span');
+        nameElement.classList.add('search-result-name');
+        nameElement.innerHTML = r.name;
+        resultDiv.appendChild(nameElement);
+
+        const mmsiElement = document.createElement('span');
+        mmsiElement.classList.add('search-result-mmsi');
+        mmsiElement.innerHTML = r.mmsi;
+        resultDiv.appendChild(mmsiElement);
+
+        resultDiv.addEventListener("click", async (e) => {
+            gmap.setCenter({lat: r.latlon[0], lng: r.latlon[1]});
+            gmap.setZoom(15);
+            openInfoWindow(gmap, shipmeta, r.mmsi);
+            openShipHistory(gmap, shipmeta, r.mmsi);
+        });
+
+        searchResults.appendChild(resultDiv);
+    }
+
+    if (results.length > 0) {
         searchResults.style.display = 'block';
     }
 }
 
-async function openInfoWindow(gmap, ships, mmsi) {
-    const ship = ships.map[mmsi];
-    const shipInfo = await getShipInfo(mmsi);
-    const category = getShipGroup(ships, ship.shipType).category;
-    const content = formatContent(ship, shipInfo, category);
+async function openInfoWindow(gmap, shipmeta, mmsi) {
+    const shipInfo = await getShipInfoWindow(mmsi);
+    shipInfo.category = getShipGroup(shipmeta, shipInfo.shipType).category;
+    const content = formatContent(shipInfo);
 
-    ships.infowindow.setOptions({
+    shipmeta.infowindow.setOptions({
         content: content,
-        position: { lat: ship.latlon[0], lng: ship.latlon[1] },
+        position: { lat: shipInfo.latlon[0], lng: shipInfo.latlon[1] },
         pixelOffset: new google.maps.Size(0, -5),
     });
-    ships.infowindow.open(gmap);
+    shipmeta.infowindow.open(gmap);
 }
 
-async function openShipHistory(gmap, ships, mmsi) {
+async function openShipHistory(gmap, shipmeta, mmsi) {
     const shipHist = await getShipHistory(mmsi);
 
     if (shipHist.length == 0) {
@@ -316,8 +315,8 @@ async function openShipHistory(gmap, ships, mmsi) {
         scale: 1,
     };
 
-    if (ships.route) ships.route.setMap(null);
-    ships.route = new google.maps.Polyline({
+    if (shipmeta.route) shipmeta.route.setMap(null);
+    shipmeta.route = new google.maps.Polyline({
         path: shipHist,
         strokeOpacity: 0,
         strokeWeight: 0,
@@ -330,7 +329,7 @@ async function openShipHistory(gmap, ships, mmsi) {
         ],
     });
 
-    ships.route.setMap(gmap);
+    shipmeta.route.setMap(gmap);
 }
 
 async function addShipMarker(state, shipGroup, ship, tileId) {
@@ -399,7 +398,7 @@ async function drawClipBuffer(state, tileId) {
     }    
 }
 
-async function canvasClick(shapes, ships, ctx, gmap, e) {
+async function canvasClick(shapes, shipmeta, ctx, gmap, e) {
     var mmsi;
     for (let i = shapes.length - 1; i >= 0; i--) {
         if (ctx.isPointInPath(shapes[i].path, e.offsetX, e.offsetY)) {
@@ -409,19 +408,19 @@ async function canvasClick(shapes, ships, ctx, gmap, e) {
     }
 
     if (mmsi) {
-        openInfoWindow(gmap, ships, mmsi);
-        openShipHistory(gmap, ships, mmsi);
+        openInfoWindow(gmap, shipmeta, mmsi);
+        openShipHistory(gmap, shipmeta, mmsi);
     } else {
-        if (ships.route) ships.route.setMap(null);
-        if (ships.infowindow) ships.infowindow.close();
+        if (shipmeta.route) shipmeta.route.setMap(null);
+        if (shipmeta.infowindow) shipmeta.infowindow.close();
     }
 }
 
-function getShipGroup(ships, type) {
+function getShipGroup(shipmeta, type) {
     let shipGroup = {};
-    if (ships.types.hasOwnProperty(type)) {
-        const shipType = ships.types[type];
-        shipGroup = ships.groups[shipType.groupId];
+    if (shipmeta.types.hasOwnProperty(type)) {
+        const shipType = shipmeta.types[type];
+        shipGroup = shipmeta.groups[shipType.groupId];
     } else {
         shipGroup['category'] = "Other";
         shipGroup['color'] = "#949494";
@@ -430,23 +429,23 @@ function getShipGroup(ships, type) {
     return shipGroup;
 }
 
-function formatContent(ship, shipInfo, category) {
-    let name = ship.name;
+function formatContent(shipInfo) {
+    let name = shipInfo.name;
     if (shipInfo.imoNumber) {
-        name = `<a href="https://www.shipspotting.com/photos/gallery?imo=${shipInfo.imoNumber}" target="_blank" rel="noopener noreferrer">${ship.name}</a>`;
+        name = `<a href="https://www.shipspotting.com/photos/gallery?imo=${shipInfo.imoNumber}" target="_blank" rel="noopener noreferrer">${shipInfo.name}</a>`;
     }
 
     const content = 
     `<div id="infoWindow">` +
     `<p><b>${name}</b></p>` +
-    `<p>MMSI: ${ship.mmsi}\n` + 
-    `Position: ${ship.latlon[0].toFixed(4)}, ${ship.latlon[1].toFixed(4)}\n` +
-    `Heading: ${ship.heading}\n` +
-    `Speed (kt): ${ship.sog}\n` +
+    `<p>MMSI: ${shipInfo.mmsi}\n` + 
+    `Position: ${shipInfo.latlon[0].toFixed(4)}, ${shipInfo.latlon[1].toFixed(4)}\n` +
+    `Heading: ${shipInfo.heading}\n` +
+    `Speed (kt): ${shipInfo.sog}\n` +
     `Dest: ${shipInfo.destination}\n` +
-    `ShipType: ${category} (${ship.shipType})\n` +
-    `NavStat: ${ship.navStat}\n` +
-    `Last Seen: ${friendlyTime(ship.lastUpdate)}` +
+    `ShipType: ${shipInfo.category} (${shipInfo.shipType})\n` +
+    `NavStat: ${shipInfo.navStat}\n` +
+    `Last Seen: ${friendlyTime(shipInfo.lastUpdate)}` +
     `</div>`;
 
     return content;
@@ -478,11 +477,6 @@ function friendlyTime(lastUpdate) {
     return s;
 }
 
-async function getShips() {
-    const { data } = await axiosInstance.get("/ships");
-    return data;
-}
-
 // getShipsBbox returns an array of ships, sorted by geohash.
 // Plotting shapes in this order will result shape overlap that is not aesthetically pleasing.
 // Sorting by mmsi will plot shapes in a manner that lacks geospatial awareness.
@@ -493,8 +487,8 @@ async function getShipsBbox(bounds) {
     return data;
 }
 
-async function getShipInfo(mmsi) {
-    const { data } = await axiosInstance.get('/shipInfo/' + mmsi);
+async function getShipInfoWindow(mmsi) {
+    const { data } = await axiosInstance.get('/shipInfoWindow/' + mmsi);
     return data;
 }
 
@@ -518,6 +512,11 @@ async function getShipHistory(mmsi) {
         });
     }
     return hist;
+}
+
+async function getSearchCache() {
+    const { data } = await axiosInstance.get('/searchFields');
+    return data;
 }
 
 // debounce function from https://www.joshwcomeau.com/snippets/javascript/debounce/

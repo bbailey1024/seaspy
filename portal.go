@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+// TODO
+// Move json encoding from dock to portal
+// Use json.NewEncoder(w).Encode()
+// Consider putting this into its own function (set headers there as well)
+// Call that function from handlers
+// Remove log.fatals
+
 type Portal struct {
 	ListenAddr string `json:"listenAddr"`
 	HtmlDir    string `json:"htmlDir"`
@@ -42,17 +49,17 @@ func ListenAndServe(ctx context.Context, dock *Dock, p Portal, g Google) {
 	mux.HandleFunc("GET /shipDump", func(w http.ResponseWriter, r *http.Request) {
 		shipDump(w, r, dock)
 	})
-	mux.HandleFunc("GET /shipInfo/{mmsi}", func(w http.ResponseWriter, r *http.Request) {
-		shipInfo(w, r, dock)
+	mux.HandleFunc("GET /shipInfoWindow/{mmsi}", func(w http.ResponseWriter, r *http.Request) {
+		shipInfoWindow(w, r, dock)
 	})
 	mux.HandleFunc("GET /shipHistory/{mmsi}", func(w http.ResponseWriter, r *http.Request) {
 		shipHistory(w, r, dock)
 	})
-	mux.HandleFunc("GET /geoList", func(w http.ResponseWriter, r *http.Request) {
-		geoList(w, r, dock)
-	})
 	mux.HandleFunc("GET /ships/{sw}/{ne}", func(w http.ResponseWriter, r *http.Request) {
 		shipsBbox(w, r, dock)
+	})
+	mux.HandleFunc("GET /searchFields", func(w http.ResponseWriter, r *http.Request) {
+		searchFields(w, r, dock)
 	})
 
 	mux.HandleFunc("GET /shipTypes", shipTypes)
@@ -104,7 +111,7 @@ func ships(w http.ResponseWriter, _ *http.Request, d *Dock) {
 	fmt.Fprint(w, res)
 }
 
-func shipInfo(w http.ResponseWriter, r *http.Request, d *Dock) {
+func shipInfoWindow(w http.ResponseWriter, r *http.Request, d *Dock) {
 	mmsiStr := r.PathValue("mmsi")
 	if mmsiStr == "" {
 		w.WriteHeader(http.StatusNotFound)
@@ -117,7 +124,7 @@ func shipInfo(w http.ResponseWriter, r *http.Request, d *Dock) {
 		return
 	}
 
-	res, err := d.Ships.GetShipInfo(mmsi)
+	res, err := d.Ships.GetInfoWindow(mmsi)
 	if err != nil {
 		log.Fatalf("shipInfo handler failed: %s\n", err.Error())
 	}
@@ -161,15 +168,6 @@ func shipHistory(w http.ResponseWriter, r *http.Request, d *Dock) {
 	fmt.Fprint(w, res)
 }
 
-func geoList(w http.ResponseWriter, _ *http.Request, d *Dock) {
-	b, err := json.Marshal(d.Geocache.List)
-	if err != nil {
-		log.Fatalf("geoList handler failed: %s\n", err.Error())
-	}
-
-	fmt.Fprint(w, string(b))
-}
-
 func shipsBbox(w http.ResponseWriter, r *http.Request, d *Dock) {
 
 	sw := strings.Split(r.PathValue("sw"), ",")
@@ -186,7 +184,7 @@ func shipsBbox(w http.ResponseWriter, r *http.Request, d *Dock) {
 		return
 	}
 
-	res, err := d.Ships.GetShipsInBoxDebug(bbox, d.Geocache)
+	res, err := d.Ships.GetShipsInBox(bbox, d.Cache.Geo)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -208,6 +206,15 @@ func shipGroups(w http.ResponseWriter, _ *http.Request) {
 	b, err := json.Marshal(ShipTypeGroups)
 	if err != nil {
 		log.Fatalf("shipTypes handler failed: %s\n", err.Error())
+	}
+
+	fmt.Fprint(w, string(b))
+}
+
+func searchFields(w http.ResponseWriter, _ *http.Request, d *Dock) {
+	b, err := json.Marshal(d.Cache.Search.List)
+	if err != nil {
+		log.Fatalf("searchFields handler failed: %s\n", err.Error())
 	}
 
 	fmt.Fprint(w, string(b))
