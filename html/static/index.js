@@ -125,7 +125,7 @@ async function seaspy() {
         groups: shipTypes.groups,
         infowindow: infoWindow,
         route: polyline,
-        search: {},
+        search: [],
     };
 
     var state = {
@@ -179,7 +179,7 @@ function stateCleanup(state) {
 }
 
 // drawTiles draws ship markers based on latlng bounding box of the tile.
-// Tiles are drawn in reverse then forward order to ensure ship clips are drawn reliably.
+// Tiles are drawn in forward then reverse order to ensure all ship clips are drawn.
 async function drawTiles(state, shipmeta) {
     const tileData = new Map();
     await Promise.all(
@@ -225,6 +225,10 @@ async function drawTiles(state, shipmeta) {
 }
 
 function searchHandler(q, gmap, shipmeta) {
+    let searchResults = document.getElementById("search-results");
+    searchResults.innerHTML = '';
+    searchResults.style.display = 'none';
+
     if (!q || q.length < 3) {
         return;
     }
@@ -235,7 +239,7 @@ function searchHandler(q, gmap, shipmeta) {
     let results = [];
 
     for (let ship of shipmeta.search) {
-        let mmsiMatch = ship.mmsi === search;
+        let mmsiMatch = ship.mmsi == search;
         let shipMatch = false;
         if (ship.name) {
             shipMatch = ship.name.trim().toLowerCase().includes(search);
@@ -254,10 +258,6 @@ function searchHandler(q, gmap, shipmeta) {
         if (a.name > b.name) return 1;
         return 0;
     });
-
-    let searchResults = document.getElementById("search-results");
-    searchResults.innerHTML = '';
-    searchResults.style.display = 'none';
 
     for (let r of results) {
         const resultDiv = document.createElement('div');
