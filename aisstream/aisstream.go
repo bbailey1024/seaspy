@@ -187,7 +187,6 @@ connect:
 // If Conn.ping fails to write to the connection within HEARTBEAT_TIMEOUT, Conn.ping will close the connection.
 // This will cause Conn.Read to fail in the event the connection is broken.
 // This allows Reads without context timeouts for low volume subscriptions.
-// TODO - Consider implementling go routine workflow to shutdown go routine. May not be required as this function returns on error anyway.
 // https://github.com/nhooyr/websocket/blob/e3a2d32f704fb06c439e56d2a85334de04b50d32/conn.go#L224
 func (ais *AIS) heartbeat() {
 	for {
