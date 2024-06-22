@@ -1,6 +1,7 @@
 {
     "dock": {
         "shipHistory": true,
+        "cacheTimer": 5,
         "workerCount": 10
     },
     "portal": {

@@ -116,13 +116,14 @@ async function seaspy() {
         fullscreenControl: true,
     });
 
-    const shipTypes = await getShipTypes();
+    const shipmetaData = await getShipMeta();
     const infoWindow = new google.maps.InfoWindow;
     const polyline = new google.maps.Polyline;
 
     var shipmeta = {
-        types: shipTypes.types,
-        groups: shipTypes.groups,
+        types: shipmetaData.shipType,
+        groups: shipmetaData.shipGroup,
+        navstatus: shipmetaData.navStatus,
         infowindow: infoWindow,
         route: polyline,
         search: [],
@@ -291,12 +292,14 @@ function searchHandler(q, gmap, shipmeta) {
 async function openInfoWindow(gmap, shipmeta, mmsi) {
     const shipInfo = await getShipInfoWindow(mmsi);
     shipInfo.category = getShipGroup(shipmeta, shipInfo.shipType).category;
+    shipInfo.navDescription = getNavStatus(shipmeta, shipInfo.navStatus);
     const content = formatContent(shipInfo);
 
     shipmeta.infowindow.setOptions({
         content: content,
         position: { lat: shipInfo.latlon[0], lng: shipInfo.latlon[1] },
         pixelOffset: new google.maps.Size(0, -5),
+        headerDisabled: true,
     });
     shipmeta.infowindow.open(gmap);
 }
@@ -429,6 +432,13 @@ function getShipGroup(shipmeta, type) {
     return shipGroup;
 }
 
+function getNavStatus(shipmeta, navStatusId) {
+    if (shipmeta.navstatus.hasOwnProperty(navStatusId)) {
+        return shipmeta.navstatus[navStatusId];
+    }
+    return "Undefined";
+}
+
 function formatContent(shipInfo) {
     let name = shipInfo.name;
     if (shipInfo.imoNumber) {
@@ -444,7 +454,7 @@ function formatContent(shipInfo) {
     `Speed (kt): ${shipInfo.sog}\n` +
     `Dest: ${shipInfo.destination}\n` +
     `ShipType: ${shipInfo.category} (${shipInfo.shipType})\n` +
-    `NavStat: ${shipInfo.navStat}\n` +
+    `Status: ${shipInfo.navDescription} (${shipInfo.navStatus})\n` +
     `Last Seen: ${friendlyTime(shipInfo.lastUpdate)}` +
     `</div>`;
 
@@ -489,6 +499,11 @@ async function getShipsBbox(bounds) {
 
 async function getShipInfoWindow(mmsi) {
     const { data } = await axiosInstance.get('/shipInfoWindow/' + mmsi);
+    return data;
+}
+
+async function getShipMeta() {
+    const { data } = await axiosInstance.get('/shipMeta');
     return data;
 }
 

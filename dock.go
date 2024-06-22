@@ -46,7 +46,7 @@ type State struct {
 	Geohash    uint64    `json:"geohash"`
 	Heading    int       `json:"heading"`
 	SOG        float64   `json:"sog"`
-	NavStat    int       `json:"navStat"`
+	NavStatus  int       `json:"navStatus"`
 	ShipType   int       `json:"shipType"`
 	Marker     int       `json:"marker"`
 	Rotation   int       `json:"rotation"`
@@ -69,7 +69,7 @@ type InfoWindow struct {
 	LatLon      []float64 `json:"latlon"`
 	Heading     int       `json:"heading"`
 	SOG         float64   `json:"sog"`
-	NavStat     int       `json:"navStat"`
+	NavStatus   int       `json:"navStatus"`
 	ShipType    int       `json:"shipType"`
 	LastUpdate  int64     `json:"lastUpdate"`
 	Destination string    `json:"destination"`
@@ -219,7 +219,7 @@ func (s *Ships) UpdatePositionReport(mmsi int, m aisstream.PositionReport) {
 	defer s.StateLock.Unlock()
 	s.State[mmsi].Heading = m.TrueHeading
 	s.State[mmsi].SOG = m.Sog
-	s.State[mmsi].NavStat = m.NavigationalStatus
+	s.State[mmsi].NavStatus = m.NavigationalStatus
 }
 
 func (s *Ships) UpdateShipStaticData(mmsi int, m aisstream.ShipStaticData) {
@@ -267,7 +267,7 @@ func (s *Ships) UpdateMarker(mmsi int) {
 	defer s.StateLock.Unlock()
 
 	ship := s.State[mmsi]
-	if ship.NavStat == 1 || ship.NavStat == 5 || ship.NavStat == 6 {
+	if ship.NavStatus == 1 || ship.NavStatus == 5 || ship.NavStatus == 6 {
 		ship.Marker = 0
 	} else if ship.SOG > MOVING_SPEED_THRESHOLD {
 		ship.Marker = 1
@@ -282,68 +282,49 @@ func (s *Ships) UpdateMarker(mmsi int) {
 	}
 }
 
-func (s *Ships) GetShips() (string, error) {
-	s.StateLock.RLock()
-	b, err := json.Marshal(s.State)
-	s.StateLock.RUnlock()
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal ships: %w", err)
-	}
-
-	return string(b), nil
-}
-
-func (s *Ships) GetInfoWindow(mmsi int) (string, error) {
+func (s *Ships) GetInfoWindow(mmsi int) (InfoWindow, error) {
 	s.StateLock.RLock()
 	defer s.StateLock.RUnlock()
 
 	s.InfoLock.RLock()
 	defer s.InfoLock.RUnlock()
 
+	var infoWindow InfoWindow
+
 	if _, ok := s.State[mmsi]; !ok {
-		return "", fmt.Errorf("mmsi does not exist in ship state")
+		return infoWindow, fmt.Errorf("mmsi does not exist in ship state")
 	}
 
 	if _, ok := s.Info[mmsi]; !ok {
-		return "", fmt.Errorf("mmsi does not exist in ship info")
+		return infoWindow, fmt.Errorf("mmsi does not exist in ship info")
 	}
 
-	infoWindow := InfoWindow{
-		Name:        s.State[mmsi].Name,
-		MMSI:        s.State[mmsi].MMSI,
-		LatLon:      s.State[mmsi].LatLon,
-		Heading:     s.State[mmsi].Heading,
-		SOG:         s.State[mmsi].SOG,
-		NavStat:     s.State[mmsi].NavStat,
-		ShipType:    s.State[mmsi].ShipType,
-		LastUpdate:  s.State[mmsi].LastUpdate,
-		Destination: s.Info[mmsi].Destination,
-		IMONumber:   s.Info[mmsi].IMONumber,
-	}
+	infoWindow.Name = s.State[mmsi].Name
+	infoWindow.MMSI = s.State[mmsi].MMSI
+	infoWindow.LatLon = s.State[mmsi].LatLon
+	infoWindow.Heading = s.State[mmsi].Heading
+	infoWindow.SOG = s.State[mmsi].SOG
+	infoWindow.NavStatus = s.State[mmsi].NavStatus
+	infoWindow.ShipType = s.State[mmsi].ShipType
+	infoWindow.LastUpdate = s.State[mmsi].LastUpdate
+	infoWindow.Destination = s.Info[mmsi].Destination
+	infoWindow.IMONumber = s.Info[mmsi].IMONumber
 
-	b, err := json.Marshal(infoWindow)
-	if err != nil {
-		return "", fmt.Errorf("could not marshal ship info: %w", err)
-	}
-	return string(b), nil
+	return infoWindow, nil
 }
 
-func (s *Ships) GetShipHistory(mmsi int) (string, error) {
+func (s *Ships) GetShipHistory(mmsi int) ([]History, error) {
 	s.HistoryLock.RLock()
 	defer s.HistoryLock.RUnlock()
 
-	if _, ok := s.History[mmsi]; !ok {
-		return "", fmt.Errorf("mmsi does not exist in ship history")
+	if history, ok := s.History[mmsi]; !ok {
+		return nil, fmt.Errorf("mmsi does not exist in ship history")
+	} else {
+		return history, nil
 	}
-
-	b, err := json.Marshal(s.History[mmsi])
-	if err != nil {
-		return "", fmt.Errorf("could not marshal ship history: %w", err)
-	}
-	return string(b), nil
 }
 
-func (s *Ships) GetShipDump() (string, error) {
+func (s *Ships) GetShipDump() (map[int]*ShipDump, error) {
 
 	ships := make(map[int]*ShipDump)
 
@@ -368,23 +349,18 @@ func (s *Ships) GetShipDump() (string, error) {
 	}
 	s.HistoryLock.RUnlock()
 
-	b, err := json.Marshal(ships)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal ship dump: %w", err)
-	}
-
-	return string(b), nil
+	return ships, nil
 }
 
-func (s *Ships) GetShipsInBox(bbox [2][2]float64, geocache *Geocache) (string, error) {
+func (s *Ships) GetShipsInBox(bbox [2][2]float64, geocache *Geocache) ([]*State, error) {
 
 	if !validBbox(bbox) {
-		return "", fmt.Errorf("bounding box out of range")
+		return nil, fmt.Errorf("bounding box out of range")
 	}
 
 	begin, end, err := geocache.BinarySearch(bbox)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// If begin is greater than end, ship results should loop around geocache list.
@@ -413,18 +389,13 @@ func (s *Ships) GetShipsInBox(bbox [2][2]float64, geocache *Geocache) (string, e
 	}
 	s.StateLock.RUnlock()
 
-	b, err := json.Marshal(shipsInCoords)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal ships in box: %w", err)
-	}
-
-	return string(b), nil
+	return shipsInCoords, nil
 }
 
-func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) (string, error) {
+func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) ([]*State, error) {
 
 	if !validBbox(bbox) {
-		return "", fmt.Errorf("bounding box out of range")
+		return nil, fmt.Errorf("bounding box out of range")
 	}
 
 	totalTime := time.Now()
@@ -433,7 +404,7 @@ func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) (stri
 
 	begin, end, err := geocache.BinarySearch(bbox)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// If begin is greater than end, ship results should loop around geocache list.
@@ -481,13 +452,6 @@ func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) (stri
 
 	s.StateLock.RUnlock()
 
-	marshalTime := time.Now()
-	b, err := json.Marshal(shipsInCoords)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal ships in box: %w", err)
-	}
-	marshalElapsed := time.Since(marshalTime).Microseconds()
-
 	totalElapsed := time.Since(totalTime).Microseconds()
 
 	missing := 0
@@ -500,16 +464,15 @@ func (s *Ships) GetShipsInBoxDebug(bbox [2][2]float64, geocache *Geocache) (stri
 		fmt.Printf("of the %d binary results, %d from the control group are missing\n", len(binaryShipResults), missing)
 	}
 
-	fmt.Printf("ships: %d, binary: %d, fine: %d, ctrl: %d, marshal: %d, total: %d\n",
+	fmt.Printf("ships: %d, binary: %d, fine: %d, ctrl: %d, total: %d\n",
 		len(shipsInCoords),
 		binaryElapsed,
 		fineElapsed,
 		controlElapsed,
-		marshalElapsed,
 		totalElapsed,
 	)
 
-	return string(b), nil
+	return shipsInCoords, nil
 }
 
 func validBbox(bbox [2][2]float64) bool {

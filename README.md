@@ -8,7 +8,11 @@ Sea Spy is designed to track hundreds of thousands of vessels via Google Maps wi
 
 ![seaspy](doc/images/seaspy1.png)
 
+Vessel Search
 ![seaspy](doc/images/seaspy2.png)
+
+Vessel Timelapse (Tile Refresh)
+![seaspy](doc/images/seaspy3.gif)
 
 ### Installation
 
@@ -41,30 +45,10 @@ Sea Spy is designed to track hundreds of thousands of vessels via Google Maps wi
    * Navigate to [http://127.0.0.1:8080](http://127.0.0.1:8080).
 
 ### Known Issues
-* Vessel shape clipping
-
-   As the map is dragged, new tiles will be drawn. Ships on those new tiles may clip to the *next* tile that hasn't been retrieved yet. To address this, a clip buffer is created to draw those clips when those new tiles become available. However, ships on new tiles may clip to the *previous* tile. Since those tiles have already been drawn, clipping occurs. This could be addressed via tile redraw intervals.
-
-* No vessels on refresh
-
-   A rare race condition occurs where the tiles map isn't populated and no vessels are drawn. The tilesloaded should be the correct event listener to address this, but on rare occassions it does not. A refresh solves the issue. This could be addressed via tile redraw intervals.
-
-* Vessel history paths
-
-   Ship history api may return points that are futher than ship on screen. This could be addressed via tile redraw intervals.
-
 * Slow close on SIGINT when stream volume is very low
 
    The aisstream go routine may take up to HEARTBEAT_TIMEOUT+HEARTBEAT_INTERVAL seconds to close if the volume of the aisstream feed is very low. This is due to the select within aisstream.ConnectAndStream waiting for a Read to complete. When no traffic is present, that Read will complete on heartbeat interval. Won't fix as it's not a bug and could be alleviated with a shorter heartbeat interval or SIGKILL if the program must be closed immediately.
 
 ### Potential Roadmap
-
-* Display Features
-   * Filtering (Ship Type, No Names, Last Seen, etc)
-   * Per tile redraw interval
-* Ship API
-   * Move to a per tile ship retrieval API
-   * API returns ships based on supplied bounding box (from getTile)
-   * Puts more work on server, and requires new data structure(s) for ship storage
-   * May allow per tile redraws to animate ships (clearRect and redraw after api pull)
+* Filter buttons (Ship Type, No Names, Last Seen, etc)
 * Implement additional AIS message types and associated features (Currently only position report and ship static data messages are utilized)

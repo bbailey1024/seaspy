@@ -13,13 +13,6 @@ import (
 	"time"
 )
 
-// TODO
-// Move json encoding from dock to portal
-// Use json.NewEncoder(w).Encode()
-// Consider putting this into its own function (set headers there as well)
-// Call that function from handlers
-// Remove log.fatals
-
 type Portal struct {
 	ListenAddr string `json:"listenAddr"`
 	HtmlDir    string `json:"htmlDir"`
@@ -43,9 +36,6 @@ func ListenAndServe(ctx context.Context, dock *Dock, p Portal, g Google) {
 	mux.HandleFunc("GET /shipCount", func(w http.ResponseWriter, r *http.Request) {
 		shipCount(w, r, dock)
 	})
-	mux.HandleFunc("GET /ships", func(w http.ResponseWriter, r *http.Request) {
-		ships(w, r, dock)
-	})
 	mux.HandleFunc("GET /shipDump", func(w http.ResponseWriter, r *http.Request) {
 		shipDump(w, r, dock)
 	})
@@ -61,9 +51,7 @@ func ListenAndServe(ctx context.Context, dock *Dock, p Portal, g Google) {
 	mux.HandleFunc("GET /searchFields", func(w http.ResponseWriter, r *http.Request) {
 		searchFields(w, r, dock)
 	})
-
-	mux.HandleFunc("GET /shipTypes", shipTypes)
-	mux.HandleFunc("GET /shipGroups", shipGroups)
+	mux.HandleFunc("GET /shipMeta", shipMeta)
 
 	server := &http.Server{Addr: p.ListenAddr, Handler: mux}
 	go func() {
@@ -98,17 +86,14 @@ func index(w http.ResponseWriter, _ *http.Request, htmlDir string, g Google) {
 
 func shipCount(w http.ResponseWriter, _ *http.Request, d *Dock) {
 	d.Ships.StateLock.RLock()
-	fmt.Fprint(w, len(d.Ships.State))
+	l := len(d.Ships.State)
 	d.Ships.StateLock.RUnlock()
-}
 
-func ships(w http.ResponseWriter, _ *http.Request, d *Dock) {
-	res, err := d.Ships.GetShips()
+	w.Header().Set("Content-Type", "application/json")
+	err := json.NewEncoder(w).Encode(l)
 	if err != nil {
-		log.Fatalf("ships handler failed: %s\n", err.Error())
+		fmt.Printf("shipCount handler failed: %s\n", err.Error())
 	}
-
-	fmt.Fprint(w, res)
 }
 
 func shipInfoWindow(w http.ResponseWriter, r *http.Request, d *Dock) {
@@ -126,28 +111,30 @@ func shipInfoWindow(w http.ResponseWriter, r *http.Request, d *Dock) {
 
 	res, err := d.Ships.GetInfoWindow(mmsi)
 	if err != nil {
-		log.Fatalf("shipInfo handler failed: %s\n", err.Error())
+		fmt.Printf("shipInfo handler failed: %s\n", err.Error())
 	}
 
-	fmt.Fprint(w, res)
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(res)
+	if err != nil {
+		fmt.Printf("shipInfo handler failed: %s\n", err.Error())
+	}
 }
 
 func shipDump(w http.ResponseWriter, _ *http.Request, d *Dock) {
 	res, err := d.Ships.GetShipDump()
 	if err != nil {
-		log.Fatalf("shipDump handler failed: %s\n", err.Error())
+		fmt.Printf("shipDump handler failed: %s\n", err.Error())
 	}
 
-	fmt.Fprint(w, res)
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(res)
+	if err != nil {
+		fmt.Printf("shipDump handler failed: %s\n", err.Error())
+	}
 }
 
 func shipHistory(w http.ResponseWriter, r *http.Request, d *Dock) {
-
-	if !d.ShipHistory {
-		fmt.Fprint(w, "[]")
-		return
-	}
-
 	mmsiStr := r.PathValue("mmsi")
 	if mmsiStr == "" {
 		w.WriteHeader(http.StatusNotFound)
@@ -162,14 +149,17 @@ func shipHistory(w http.ResponseWriter, r *http.Request, d *Dock) {
 
 	res, err := d.Ships.GetShipHistory(mmsi)
 	if err != nil {
-		log.Fatalf("shipHistory handler failed: %s\n", err.Error())
+		fmt.Printf("shipHistory handler failed: %s\n", err.Error())
 	}
 
-	fmt.Fprint(w, res)
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(res)
+	if err != nil {
+		fmt.Printf("shipHistory handler failed: %s\n", err.Error())
+	}
 }
 
 func shipsBbox(w http.ResponseWriter, r *http.Request, d *Dock) {
-
 	sw := strings.Split(r.PathValue("sw"), ",")
 	ne := strings.Split(r.PathValue("ne"), ",")
 
@@ -181,47 +171,47 @@ func shipsBbox(w http.ResponseWriter, r *http.Request, d *Dock) {
 	bbox, err := generateBbox(sw, ne)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
+		fmt.Printf("shipsBbox handler failed: %s\n", err.Error())
 		return
 	}
 
 	res, err := d.Ships.GetShipsInBox(bbox, d.Cache.Geo)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
+		fmt.Printf("shipsBbox handler failed: %s\n", err.Error())
 		return
 	}
 
-	fmt.Fprint(w, res)
-}
-
-func shipTypes(w http.ResponseWriter, _ *http.Request) {
-	b, err := json.Marshal(ShipTypes)
+	w.Header().Set("Content-Type", "application/json")
+	err = json.NewEncoder(w).Encode(res)
 	if err != nil {
-		log.Fatalf("shipTypes handler failed: %s\n", err.Error())
+		fmt.Printf("shipsBbox handler failed: %s\n", err.Error())
 	}
-
-	fmt.Fprint(w, string(b))
-}
-
-func shipGroups(w http.ResponseWriter, _ *http.Request) {
-	b, err := json.Marshal(ShipTypeGroups)
-	if err != nil {
-		log.Fatalf("shipTypes handler failed: %s\n", err.Error())
-	}
-
-	fmt.Fprint(w, string(b))
 }
 
 func searchFields(w http.ResponseWriter, _ *http.Request, d *Dock) {
-	b, err := json.Marshal(d.Cache.Search.List)
+	w.Header().Set("Content-Type", "application/json")
+	err := json.NewEncoder(w).Encode(d.Cache.Search.List)
 	if err != nil {
-		log.Fatalf("searchFields handler failed: %s\n", err.Error())
+		fmt.Printf("searchFields handler failed: %s\n", err.Error())
+	}
+}
+
+func shipMeta(w http.ResponseWriter, _ *http.Request) {
+	shipmeta := ShipMetadata{
+		ShipType:  ShipTypes,
+		ShipGroup: ShipTypeGroups,
+		NavStatus: NavStatus,
 	}
 
-	fmt.Fprint(w, string(b))
+	w.Header().Set("Content-Type", "application/json")
+	err := json.NewEncoder(w).Encode(shipmeta)
+	if err != nil {
+		fmt.Printf("shipMeta handler failed: %s\n", err.Error())
+	}
 }
 
 func generateBbox(sw []string, ne []string) ([2][2]float64, error) {
-
 	bbox := [2][2]float64{}
 	var err error
 
