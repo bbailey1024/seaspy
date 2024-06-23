@@ -12,7 +12,7 @@ Vessel Search
 ![seaspy](doc/images/seaspy2.png)
 
 Vessel Timelapse (Tile Refresh)
-![seaspy](doc/images/seaspy3.gif)
+https://github.com/bbailey1024/seaspy/blob/dev/doc/images/seaspy_timelapse.mp4
 
 ### Installation
 
