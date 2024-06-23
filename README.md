@@ -8,10 +8,7 @@ Sea Spy is designed to track hundreds of thousands of vessels via Google Maps wi
 
 ![seaspy](doc/images/seaspy1.png)
 
-Vessel Search
 ![seaspy](doc/images/seaspy2.png)
-
-Vessel Timelapse (Tile Refresh)
 
 https://github.com/bbailey1024/seaspy/assets/5913377/78464924-db4d-49d1-a0c7-b93c09ad9c06
 
